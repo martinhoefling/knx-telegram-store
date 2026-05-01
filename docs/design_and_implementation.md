@@ -605,7 +605,7 @@ test_order_ascending
 
 ### Consumer Integration Tests
 
-- **Home Assistant:** Run existing `test_telegrams.py` against the refactored `Telegrams` class. The tests should pass without modification, confirming backward compatibility.
+- **Home Assistant:** Run existing `test_telegrams.py` against the refactored `Telegrams` class. These tests must be run twice: once using the **In-Memory** backend and once using the **SQLite** backend, ensuring backward compatibility and functional parity across storage types.
 - **SpectrumKNX:** Seed data via the library's `PostgresStore`, query via the existing `/api/telegrams` endpoint, verify identical JSON output.
 
 ### Manual Verification
