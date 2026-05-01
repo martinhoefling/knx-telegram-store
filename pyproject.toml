@@ -24,8 +24,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/mar-v-in/knx-telegram-store"
-Bug-Tracker = "https://github.com/mar-v-in/knx-telegram-store/issues"
+Homepage = "https://github.com/martinhoefling/knx-telegram-store"
+Bug-Tracker = "https://github.com/martinhoefling/knx-telegram-store/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -40,8 +40,8 @@ A **standalone, host-agnostic Python library** (`knx-telegram-store`) that:
 
 1. Defines a **single canonical data model** for a stored KNX telegram.
 2. Provides an **abstract storage interface** with pluggable backends.
-3. Ships three backends: **In-Memory** (testing and small deployments), **SQLite** (lightweight persistent), **PostgreSQL/TimescaleDB** (full scale).
-4. Provides a **unified query/filter model** implemented natively by all backends.
+3. Ships two primary backend types: **In-Memory** (testing and small deployments) and **SQLAlchemy-based SQL** (SQLite for lightweight persistence, PostgreSQL for full scale).
+4. Provides a **unified query/filter model** implemented natively by both backend types.
 5. Is usable from both Home Assistant KNX and SpectrumKNX **without pulling in their respective framework dependencies**.
 
 ---
@@ -288,13 +288,13 @@ class TelegramQueryResult:
 
 ### Graceful degradation matrix
 
-| Feature | In-Memory | SQLite | PostgreSQL |
-|---|---|---|---|
-| Multi-value filters | ✅ list comprehension | ✅ SQL `IN()` | ✅ SQL `IN()` |
-| Time range | ✅ timestamp check | ✅ `WHERE ts BETWEEN` | ✅ hypertable-optimized |
-| Time-delta context | ✅ two-pass filter | ✅ SQL subquery | ✅ native (current SpectrumKNX impl) |
-| Pagination | ✅ list slicing | ✅ `LIMIT/OFFSET` | ✅ `LIMIT/OFFSET` |
-| Count | ✅ `len()` | ✅ `SELECT COUNT(*)` | ✅ `SELECT COUNT(*)` |
+| Feature | In-Memory | SQL (SQLite / Postgres) |
+|---|---|---|
+| Multi-value filters | ✅ list comprehension | ✅ SQLAlchemy `in_()` |
+| Time range | ✅ timestamp check | ✅ `ts.between()` |
+| Time-delta context | ✅ two-pass filter | ✅ SQL subquery / CTE |
+| Pagination | ✅ list slicing | ✅ `limit()` / `offset()` |
+| Count | ✅ `len()` | ✅ `select(func.count())` |
 
 Since all backends support native filtering, the consumer can trust that the results returned by `query()` are accurate and do not require further client-side processing.
 
@@ -554,16 +554,12 @@ dev = ["pytest", "pytest-asyncio", "pytest-cov", "aiosqlite", "asyncpg", "sqlalc
 3. **Unit tests** — Shared test suite parametrized across backends
 4. **Project Setup** — Initialize `LICENSE` (MIT) and project documentation
 
-### Phase 2: PostgreSQL Backend
+### Phase 2: SQL Backends (SQLAlchemy)
 
-7. **Extract from SpectrumKNX** — Port the SQLAlchemy storage and time-delta query logic into `PostgresStore`
-8. **Refactor SpectrumKNX** — Replace `models.py` + inline queries with the library
-9. **Verify** — SpectrumKNX integration tests, existing live/history views work
-
-### Phase 3: SQLite Backend
-
-10. **Implement SQLite** — Async SQLite with full query support
-11. **Test in both consumers** — HA with SQLite backend, SpectrumKNX with SQLite backend
+5. **Define SQL Schema** — Create a shared SQLAlchemy model for `telegrams`
+6. **Implement PostgresStore** — Port existing SpectrumKNX logic using the shared SQL base
+7. **Implement SqliteStore** — Leverage SQLAlchemy's async SQLite support
+8. **Verify** — Both backends pass the shared test suite
 12. **Publish to PyPI**
 
 ### Phase 5: Frontend Enhancements (future)
