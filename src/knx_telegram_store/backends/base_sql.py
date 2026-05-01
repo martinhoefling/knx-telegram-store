@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import json
 from abc import abstractmethod
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -19,7 +18,6 @@ from sqlalchemy import (
     Text,
     and_,
     func,
-    or_,
     select,
 )
 from sqlalchemy.ext.asyncio import AsyncEngine

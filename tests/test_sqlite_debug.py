@@ -1,6 +1,9 @@
 from datetime import UTC, datetime, timedelta
+
 import pytest
+
 from knx_telegram_store import StoredTelegram, TelegramQuery
+
 
 @pytest.fixture
 def sample_telegrams():

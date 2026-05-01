@@ -1,7 +1,9 @@
+
 import pytest
-from pathlib import Path
+
 from knx_telegram_store.backends.memory import MemoryStore
 from knx_telegram_store.backends.sqlite import SqliteStore
+
 
 @pytest.fixture(params=["memory", "sqlite"])
 async def store(request, tmp_path):
