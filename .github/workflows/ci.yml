@@ -26,6 +26,10 @@ jobs:
         run: |
           ruff check .
           
+      - name: Type check with Mypy
+        run: |
+          mypy src/knx_telegram_store
+          
       - name: Run Tests with Pytest
         run: |
           export PYTHONPATH=src

@@ -138,7 +138,7 @@ class BaseSQLStore(TelegramStore):
         stmt = select(self.telegrams)
 
         # 1. Base Filters
-        filters = []
+        filters: list[Any] = []
         if query.sources:
             filters.append(self.telegrams.c.source.in_(query.sources))
         if query.destinations:
@@ -225,7 +225,7 @@ class BaseSQLStore(TelegramStore):
             for row in rows
         ]
 
-        limit_reached = total_count > (query.offset + query.limit)
+        limit_reached = (total_count or 0) > (query.offset + query.limit)
 
         return TelegramQueryResult(
             telegrams=telegrams,
@@ -236,7 +236,7 @@ class BaseSQLStore(TelegramStore):
     async def count(self) -> int:
         """Return the total number of stored telegrams."""
         async with self.engine.connect() as conn:
-            return await conn.scalar(select(func.count()).select_from(self.telegrams))
+            return await conn.scalar(select(func.count()).select_from(self.telegrams)) or 0
 
     async def clear(self) -> None:
         """Remove all stored telegrams."""
