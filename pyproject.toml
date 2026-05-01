@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A standalone, host-agnostic Python library for KNX telegram persistence."
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Martin Hoefling"}
 ]
@@ -27,9 +27,15 @@ dependencies = []
 Homepage = "https://github.com/martinhoefling/knx-telegram-store"
 Bug-Tracker = "https://github.com/martinhoefling/knx-telegram-store/issues"
 
+[tool.setuptools]
+include-package-data = true
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["knx_telegram_store*"]
+
+[tool.setuptools.package-data]
+knx_telegram_store = ["py.typed"]
 
 [project.optional-dependencies]
 sqlite = ["aiosqlite>=0.20", "sqlalchemy[asyncio]>=2.0"]
@@ -39,6 +45,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.1",
     "ruff>=0.3",
+    "mypy>=1.9",
     "aiosqlite>=0.20"
 ]
 
