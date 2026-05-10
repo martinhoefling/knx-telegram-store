@@ -68,6 +68,16 @@ class BaseSQLStore(TelegramStore):
         """Return the capabilities of this backend."""
         return self._capabilities
 
+    @property
+    def retention_days(self) -> int | None:
+        """Return the configured retention period in days."""
+        return self._retention_days
+
+    @property
+    def max_telegrams(self) -> int | None:
+        """SQL stores are typically not limited by count."""
+        return None
+
     @abstractmethod
     async def initialize(self) -> None:
         """Set up the store (create tables, upgrades)."""
