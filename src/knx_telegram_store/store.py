@@ -25,6 +25,16 @@ class TelegramStore(ABC):
 
     @property
     @abstractmethod
+    def retention_days(self) -> int | None:
+        """Return the configured retention period in days, or None if disabled."""
+
+    @property
+    @abstractmethod
+    def max_telegrams(self) -> int | None:
+        """Return the configured maximum number of telegrams, or None if unlimited."""
+
+    @property
+    @abstractmethod
     def capabilities(self) -> StoreCapabilities:
         """Return the capabilities of this backend."""
 

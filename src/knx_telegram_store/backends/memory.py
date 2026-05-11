@@ -29,6 +29,16 @@ class MemoryStore(TelegramStore):
         """Return the capabilities of this backend."""
         return self._capabilities
 
+    @property
+    def retention_days(self) -> int | None:
+        """Memory store does not support time-based retention."""
+        return None
+
+    @property
+    def max_telegrams(self) -> int | None:
+        """Return the configured maximum number of telegrams."""
+        return self._max_telegrams
+
     async def initialize(self) -> None:
         """Set up the store. Idempotent."""
 
