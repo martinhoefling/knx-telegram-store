@@ -2,54 +2,44 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import deque
 from collections.abc import Sequence
-from datetime import datetime
+from typing import Any
 
+from .backends.postgres import PostgresStore
+from .backends.sqlite import SqliteStore
 from .model import StoredTelegram
 from .query import TelegramQuery, TelegramQueryResult
-from .store import StoreCapabilities, TelegramStore
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class BufferedTelegramStore:
-    """Write-buffering wrapper for any TelegramStore backend.
+class _BufferMixin:
+    """Write-buffering mixin for SQL-backed TelegramStore subclasses.
 
-    - store() is synchronous — appends to an in-memory buffer (no I/O).
-    - The buffer is flushed to the inner store periodically via store_many().
-    - store_many() passes directly through to the inner store (no buffering).
-    - On flush failure, the batch is re-prepended to preserve data.
-    - All read/query/eviction methods delegate directly to the inner store.
+    Place this before the concrete store in the MRO:
+
+        class BufferedSqliteStore(_BufferMixin, SqliteStore): ...
+
+    The mixin intercepts store() / store_sync() and accumulates telegrams in an
+    in-memory list.  A periodic background task (start/stop) drains the buffer
+    by calling self.store_many(), which resolves to the SQL backend via MRO.
+
+    Behaviour:
+    - store() / store_sync() are O(1) and never touch the database.
+    - flush() atomically drains the buffer and delegates to store_many().
+    - On flush failure the batch is re-prepended so no writes are lost.
+    - query() accepts flush_first=True to guarantee read-your-writes consistency.
+    - clear() wipes both the in-memory buffer and the underlying table.
     """
 
-    def __init__(
-        self,
-        inner: TelegramStore,
-        *,
-        flush_interval: float = 1.0,
-    ) -> None:
-        """Initialize the buffered store."""
-        self.inner = inner
-        self.flush_interval = flush_interval
-        self._buffer: deque[StoredTelegram] = deque()
-        self._flush_task: asyncio.Task | None = None
+    def __init__(self, *args: Any, flush_interval: float = 1.0, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._buffer: list[StoredTelegram] = []
+        self._flush_task: asyncio.Task[None] | None = None
         self._closing = False
+        self.flush_interval = flush_interval
 
-    @property
-    def capabilities(self) -> StoreCapabilities:
-        """Return the capabilities of the inner store."""
-        return self.inner.capabilities
-
-    @property
-    def retention_days(self) -> int | None:
-        """Return the configured retention period of the inner store."""
-        return self.inner.retention_days
-
-    @property
-    def max_telegrams(self) -> int | None:
-        """Return the configured maximum number of telegrams of the inner store."""
-        return self.inner.max_telegrams
+    # --- Lifecycle ---
 
     def start(self) -> None:
         """Start the periodic flush task."""
@@ -58,7 +48,7 @@ class BufferedTelegramStore:
         self._flush_task = asyncio.create_task(self._flush_loop())
 
     async def stop(self) -> None:
-        """Stop the periodic flush task and perform a final flush."""
+        """Stop the periodic flush task, perform a final flush, then close."""
         self._closing = True
         if self._flush_task is not None:
             self._flush_task.cancel()
@@ -68,69 +58,105 @@ class BufferedTelegramStore:
                 pass
             self._flush_task = None
 
-        await self.flush()
-        await self.inner.close()
-
-    def store(self, telegram: StoredTelegram) -> None:
-        """Append a telegram to the buffer (synchronous)."""
-        if self._closing:
-            _LOGGER.warning("Store is closing, dropping telegram")
-            return
-        self._buffer.append(telegram)
-
-    async def store_many(self, telegrams: Sequence[StoredTelegram]) -> None:
-        """Persist multiple telegrams directly to the inner store (bypass buffer)."""
-        await self.inner.store_many(telegrams)
-
-    async def flush(self) -> None:
-        """Flush the buffer to the inner store."""
-        if not self._buffer:
-            return
-
-        # Take everything from the buffer
-        batch: list[StoredTelegram] = []
-        while self._buffer:
-            batch.append(self._buffer.popleft())
-
-        try:
-            await self.inner.store_many(batch)
-        except Exception as err:
-            _LOGGER.error("Error flushing telegram buffer: %s", err)
-            # Re-prepend the batch to the buffer
-            self._buffer.extendleft(reversed(batch))
+        await self._flush()
+        await self.close()  # type: ignore[attr-defined]
 
     async def _flush_loop(self) -> None:
         """Periodic flush loop."""
         while not self._closing:
             try:
                 await asyncio.sleep(self.flush_interval)
-                await self.flush()
+                await self._flush()
             except asyncio.CancelledError:
                 break
             except Exception as err:
                 _LOGGER.exception("Unexpected error in flush loop: %s", err)
 
-    async def initialize(self) -> None:
-        """Initialize the inner store."""
-        await self.inner.initialize()
+    # --- Write path ---
 
-    async def query(self, query: TelegramQuery) -> TelegramQueryResult:
-        """Query the inner store."""
-        return await self.inner.query(query)
+    async def store(self, telegram: StoredTelegram) -> None:
+        """Append a telegram to the buffer (non-blocking, no I/O)."""
+        if self._closing:
+            _LOGGER.warning("Store is closing, dropping telegram")
+            return
+        self._buffer.append(telegram)
 
-    async def count(self) -> int:
-        """Return the total number of stored telegrams in the inner store."""
-        return await self.inner.count()
+    def store_sync(self, telegram: StoredTelegram) -> None:
+        """Synchronous alias for store(), for use inside sync callbacks."""
+        if self._closing:
+            _LOGGER.warning("Store is closing, dropping telegram")
+            return
+        self._buffer.append(telegram)
 
-    async def evict_older_than(self, cutoff: datetime, *, dry_run: bool = False) -> int:
-        """Evict telegrams from the inner store."""
-        return await self.inner.evict_older_than(cutoff, dry_run=dry_run)
+    async def _flush(self) -> None:
+        """Drain the buffer into the backing store (private implementation)."""
+        if not self._buffer:
+            return
 
-    async def evict_expired(self, *, dry_run: bool = False) -> int:
-        """Evict expired telegrams from the inner store."""
-        return await self.inner.evict_expired(dry_run=dry_run)
+        batch = self._buffer.copy()
+        self._buffer.clear()
+
+        try:
+            await self.store_many(batch)  # type: ignore[attr-defined]
+        except Exception as err:
+            _LOGGER.error("Error flushing telegram buffer: %s", err)
+            # Re-prepend the batch so it's retried before any newer items
+            self._buffer[0:0] = batch
+
+    async def flush(self) -> None:
+        """Flush the buffer now and reset the periodic timer.
+
+        Resets the flush_interval countdown so the next automatic flush is
+        flush_interval seconds from now, avoiding a near-immediate double-flush
+        when flush() is called close to a scheduled tick.
+        """
+        await self._flush()
+        # Reset the periodic timer so the next auto-flush starts fresh
+        if self._flush_task is not None and not self._closing:
+            self._flush_task.cancel()
+            self._flush_task = asyncio.create_task(self._flush_loop())
+
+    # --- Read path override (flush_first support) ---
+
+    async def query(
+        self, query: TelegramQuery, *, flush_first: bool = False
+    ) -> TelegramQueryResult:
+        """Query the store.
+
+        Args:
+            query: The query to execute.
+            flush_first: If True, flush buffered writes before querying so that
+                all previously stored telegrams are visible in the result.
+                Defaults to False; set to True when read-your-writes consistency
+                is required (e.g. after a bulk import).
+        """
+        if flush_first:
+            await self.flush()
+        return await super().query(query)  # type: ignore[misc, no-any-return]
+
+    # --- Clear overrride (wipe buffer + table) ---
 
     async def clear(self) -> None:
-        """Clear the inner store and the buffer."""
+        """Clear both the in-memory buffer and the underlying table."""
         self._buffer.clear()
-        await self.inner.clear()
+        await super().clear()  # type: ignore[misc]
+
+
+class BufferedSqliteStore(_BufferMixin, SqliteStore):
+    """SqliteStore with transparent write-buffering.
+
+    Args:
+        db_path: Path to the SQLite database file, or ``:memory:``.
+        retention_days: Optional retention period in days.
+        flush_interval: Seconds between automatic buffer flushes (default 1.0).
+    """
+
+
+class BufferedPostgresStore(_BufferMixin, PostgresStore):
+    """PostgresStore with transparent write-buffering.
+
+    Args:
+        dsn: PostgreSQL connection string.
+        retention_days: Optional retention period in days.
+        flush_interval: Seconds between automatic buffer flushes (default 1.0).
+    """
