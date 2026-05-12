@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
 from typing import Any
 
 from .backends.postgres import PostgresStore
@@ -118,9 +117,7 @@ class _BufferMixin:
 
     # --- Read path override (flush_first support) ---
 
-    async def query(
-        self, query: TelegramQuery, *, flush_first: bool = False
-    ) -> TelegramQueryResult:
+    async def query(self, query: TelegramQuery, *, flush_first: bool = False) -> TelegramQueryResult:
         """Query the store.
 
         Args:
